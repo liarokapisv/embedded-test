@@ -1,0 +1,11 @@
+{
+    "check" : {
+        "allTargets" : false
+    },
+    "procMacro" : { 
+        "enable" : true
+    },
+    "diagnostics" : { 
+        "disabled" : "inactive-code"
+    }
+}
