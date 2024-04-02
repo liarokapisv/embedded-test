@@ -40,14 +40,14 @@ impl Handler2 {
     }
 }
 
-impl FlowCollector<Event, Context> for Handler1 {
-    fn emit(&mut self, _value: &Event, context: &mut Context) {
+impl FlowCollector<Token, Event, Context> for Handler1 {
+    fn emit(&mut self, _token: &mut Token, _value: &Event, context: &mut Context) {
         context.counter += 2;
     }
 }
 
-impl FlowCollector<Event, Context> for Handler2 {
-    fn emit(&mut self, _value: &Event, context: &mut Context) {
+impl FlowCollector<Token, Event, Context> for Handler2 {
+    fn emit(&mut self, _token: &mut Token, _value: &Event, context: &mut Context) {
         context.counter -= 1;
     }
 }

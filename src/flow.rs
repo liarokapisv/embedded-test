@@ -1,29 +1,27 @@
 use core::cell::Cell;
-use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
 use core::ptr::NonNull;
 use pinned_init::*;
 use singleton_cell::{SCell, Singleton};
 
-pub trait FlowCollector<V, Cxt> {
-    fn emit(&mut self, value: &V, context: &mut Cxt);
+pub trait FlowCollector<K, V, Cxt> {
+    fn emit(&mut self, token: &mut K, value: &V, context: &mut Cxt);
 }
 
-trait IsFlowNode<V, Cxt> {
-    fn node_ptrs(&self) -> &FlowNodePtrs<V, Cxt>;
-    fn collector(&mut self) -> &mut dyn FlowCollector<V, Cxt>;
+trait IsFlowNode<K, V, Cxt> {
+    fn node_ptrs(&self) -> &FlowNodePtrs<K, V, Cxt>;
+    fn collector(&mut self) -> &mut dyn FlowCollector<K, V, Cxt>;
 }
 
-struct FlowNodePtrs<V, Cxt> {
-    prev: Cell<NonNull<dyn IsFlowNode<V, Cxt>>>,
-    next: Cell<NonNull<dyn IsFlowNode<V, Cxt>>>,
+struct FlowNodePtrs<K, V, Cxt> {
+    prev: Cell<NonNull<dyn IsFlowNode<K, V, Cxt>>>,
+    next: Cell<NonNull<dyn IsFlowNode<K, V, Cxt>>>,
 }
 
 #[pin_data]
 pub struct Flow<K, V, Cxt> {
-    root: FlowNodePtrs<V, Cxt>,
-    phantom: PhantomData<K>,
+    root: FlowNodePtrs<K, V, Cxt>,
 }
 
 impl<K, V, Cxt> Flow<K, V, Cxt> {
@@ -37,16 +35,15 @@ impl<K, V, Cxt> Flow<K, V, Cxt> {
             root: FlowNodePtrs {
                 prev: Cell::new(this),
                 next: Cell::new(this),
-            },
-            phantom: PhantomData
+            }
         })
     }
 
-    pub fn emit(&self, _token: &mut K, value: &V, context: &mut Cxt)
+    pub fn emit(&self, token: &mut K, value: &V, context: &mut Cxt)
     where
         K: Singleton,
     {
-        let root_ptr: NonNull<dyn IsFlowNode<V, Cxt>> = NonNull::from(self);
+        let root_ptr: NonNull<dyn IsFlowNode<K, V, Cxt>> = NonNull::from(self);
         let mut prev_node_ptr = root_ptr;
         loop {
             let prev_node = unsafe {
@@ -79,25 +76,31 @@ impl<K, V, Cxt> Flow<K, V, Cxt> {
                 emit_node_ptr.as_mut()
             };
 
-            emit_node.collector().emit(value, context);
+            emit_node.collector().emit(token, value, context);
 
             prev_node_ptr = emit_node_ptr;
         }
     }
 }
 
-impl<K, V, Cxt> IsFlowNode<V, Cxt> for Flow<K, V, Cxt> {
-    fn node_ptrs(&self) -> &FlowNodePtrs<V, Cxt> {
+impl<K: Singleton, V, Cxt> FlowCollector<K, V, Cxt> for Flow<K, V, Cxt> {
+    fn emit(&mut self, token: &mut K, value: &V, context: &mut Cxt) {
+        (self as &Self).emit(token, value, context);
+    }
+}
+
+impl<K, V, Cxt> IsFlowNode<K, V, Cxt> for Flow<K, V, Cxt> {
+    fn node_ptrs(&self) -> &FlowNodePtrs<K, V, Cxt> {
         &self.root
     }
-    fn collector(&mut self) -> &mut dyn FlowCollector<V, Cxt> {
+    fn collector(&mut self) -> &mut dyn FlowCollector<K, V, Cxt> {
         unreachable!("Collector should never be called through emit");
     }
 }
 
 #[pin_data(PinnedDrop)]
 pub struct FlowHandle<K, V, Cxt, T> {
-    node_ptrs: FlowNodePtrs<V, Cxt>,
+    node_ptrs: FlowNodePtrs<K, V, Cxt>,
     x: SCell<K, T>,
 }
 
@@ -114,14 +117,14 @@ impl<K, V, Cxt, T> DerefMut for FlowHandle<K, V, Cxt, T> {
     }
 }
 
-impl<K, V, Cxt, T> IsFlowNode<V, Cxt> for FlowHandle<K, V, Cxt, T>
+impl<K, V, Cxt, T> IsFlowNode<K, V, Cxt> for FlowHandle<K, V, Cxt, T>
 where
-    T: FlowCollector<V, Cxt>,
+    T: FlowCollector<K, V, Cxt>,
 {
-    fn node_ptrs(&self) -> &FlowNodePtrs<V, Cxt> {
+    fn node_ptrs(&self) -> &FlowNodePtrs<K, V, Cxt> {
         &self.node_ptrs
     }
-    fn collector(&mut self) -> &mut dyn FlowCollector<V, Cxt> {
+    fn collector(&mut self) -> &mut dyn FlowCollector<K, V, Cxt> {
         self.x.get_mut()
     }
 }
@@ -132,7 +135,7 @@ impl<K, V, Cxt, T> FlowHandle<K, V, Cxt, T> {
         V: 'static,
         K: 'static,
         Cxt: 'static,
-        T: FlowCollector<V, Cxt> + 'static + Unpin,
+        T: FlowCollector<K, V, Cxt> + 'static + Unpin,
     {
         pin_init!(&this in Self{
             node_ptrs: {
