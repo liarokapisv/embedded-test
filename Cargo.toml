@@ -1,6 +1,6 @@
 [package]
 edition = "2021"
-name = "dreadbox-rs"
+name = "embedded-test"
 version = "0.1.0"
 authors = ["Alexandros Liarokapis <liarokapis.v@gmail.com>"]
 resolver = "2"
@@ -22,5 +22,5 @@ embassy-time = { version = "0.3.0", features = ["defmt", "defmt-timestamp-uptime
 
 cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
 embassy-stm32 = { version = "0.1.0", features = ["defmt", "stm32h743zi", "unstable-pac", "memory-x", "time-driver-any" ]  }
-bounded-integer = { version = "0.5.7", features = [ "types" ] }
-ghost-cell = "0.2.6"
+singleton-cell = "0.3.1"
+pinned-init = { version = "0.0.6", default-features = false }

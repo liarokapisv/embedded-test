@@ -39,8 +39,8 @@
               }).buildPackage;
           in
           buildRustPackage {
-            pname = "artemis";
-            version = "1.0.0";
+            pname = "embedded-test";
+            version = "0.1.0";
             src = ./.;
             CARGO_BUILD_TARGET = target;
           };
