@@ -57,6 +57,7 @@
             ];
             packages = [
               pkgs.probe-rs
+              pkgs.cargo-expand
             ];
           };
 

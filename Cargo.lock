@@ -441,6 +441,7 @@ dependencies = [
  "embedded-storage-async",
  "panic-probe",
  "pinned-init",
+ "self_cell",
  "singleton-cell",
 ]
 
@@ -687,6 +688,12 @@ name = "sdio-host"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f93c025f9cfe4c388c328ece47d11a54a823da3b5ad0370b22d95ad47137f85a"
+
+[[package]]
+name = "self_cell"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58bf37232d3bb9a2c4e641ca2a11d83b5062066f88df7fed36c28772046d65ba"
 
 [[package]]
 name = "semver"

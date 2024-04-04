@@ -9,12 +9,14 @@ use embassy_time::Timer;
 
 use embassy_executor::Spawner;
 use embassy_stm32::init;
-use flow::{Flow, FlowCollector, FlowHandle};
+use flow::{Flow, FlowCollector, FlowHandle2};
 use pinned_init::*;
 use singleton_cell::new_singleton;
+use singleton_cell::SCell;
 use {defmt_rtt as _, panic_probe as _};
 
-new_singleton!(pub Token);
+new_singleton!(pub ListToken);
+new_singleton!(pub DataToken);
 
 enum Event {
     Event,
@@ -25,72 +27,65 @@ struct Context<'c> {
     x: &'c mut u32,
 }
 
-struct Handler1();
+struct ComponentData(u32);
 
-impl Handler1 {
-    fn extra(&mut self) {
+struct ComponentHandler1<'a>(&'a SCell<DataToken, ComponentData>);
+
+impl<'a> ComponentHandler1<'a> {
+    fn extra(&mut self, token: &mut DataToken) {
+        self.0.borrow_mut(token).0 += 1;
         defmt::info!("Handler1 extra");
     }
 }
 
-struct Handler2();
+struct ComponentHandler2<'a>(&'a SCell<DataToken, ComponentData>);
 
-impl Handler2 {
-    fn extra(&mut self) {
+impl<'a> ComponentHandler2<'a> {
+    fn extra(&mut self, token: &mut DataToken) {
+        self.0.borrow_mut(token).0 -= 1;
         defmt::info!("Handler2 extra");
     }
 }
 
-impl<'c> FlowCollector<Token, Event, Context<'c>> for Handler1 {
-    fn emit(&mut self, _token: &mut Token, _value: &Event, context: &mut Context) {
+impl<'c, 'a> FlowCollector<Event, Context<'c>> for ComponentHandler1<'a> {
+    fn emit(&mut self, _value: &Event, context: &mut Context) {
         context.counter += 2;
         *context.x += 1;
     }
 }
 
-impl<'c> FlowCollector<Token, Event, Context<'c>> for Handler2 {
-    fn emit(&mut self, _token: &mut Token, _value: &Event, context: &mut Context) {
+impl<'c, 'a> FlowCollector<Event, Context<'c>> for ComponentHandler2<'a> {
+    fn emit(&mut self, _value: &Event, context: &mut Context) {
         context.counter -= 1;
         *context.x += 1;
     }
 }
 
 #[pin_data]
-struct ComponentA<'h, 'c> {
+struct Component<'h, 'c> {
     #[pin]
-    handle1: FlowHandle<'h, Token, Event, Context<'c>, Handler1>,
-    #[pin]
-    handle2: FlowHandle<'h, Token, Event, Context<'c>, Handler2>,
+    pub handle: FlowHandle2<
+        'h,
+        ListToken,
+        DataToken,
+        Context<'c>,
+        ComponentData,
+        Event,
+        ComponentHandler1<'h>,
+        Event,
+        ComponentHandler2<'h>,
+    >,
 }
 
-impl<'h, 'c> ComponentA<'h, 'c> {
-    fn new<'f>(flow: Pin<&'f Flow<'h, Token, Event, Context<'c>>>) -> impl PinInit<Self> + 'f
+impl<'h, 'c> Component<'h, 'c> {
+    fn new<'f>(flow: Pin<&'f Flow<'h, ListToken, Event, Context<'c>>>) -> impl PinInit<Self> + 'f
     where
         'c: 'h,
     {
         pin_init!(Self {
-            handle1 <- FlowHandle::new(flow, Handler1()),
-            handle2 <- FlowHandle::new(flow, Handler2())
-        })
-    }
-}
-
-#[pin_data]
-struct ComponentB<'h, 'c> {
-    #[pin]
-    comp1: ComponentA<'h, 'c>,
-    #[pin]
-    comp2: ComponentA<'h, 'c>,
-}
-
-impl<'h, 'c> ComponentB<'h, 'c> {
-    fn new<'f>(flow: Pin<&'f Flow<'h, Token, Event, Context<'c>>>) -> impl PinInit<Self> + 'f
-    where
-        'c: 'h,
-    {
-        pin_init!(Self {
-            comp1 <- ComponentA::new(flow),
-            comp2 <- ComponentA::new(flow),
+            handle <- FlowHandle2::new(
+                flow.as_ref(), flow.as_ref(), ComponentData(0), |cell| ComponentHandler1(&cell), |cell| ComponentHandler2(&cell)
+            )
         })
     }
 }
@@ -99,26 +94,33 @@ impl<'h, 'c> ComponentB<'h, 'c> {
 async fn main(mut _spawner: Spawner) {
     let _p = init(Default::default());
 
-    let mut token = Token::new().expect("only created once!");
+    let mut list_token = ListToken::new().expect("only created once!");
+    let mut data_token = DataToken::new().expect("only created once!");
     let mut x: u32 = 0;
     let mut context = Context {
         counter: 0,
         x: &mut x,
     };
 
-    stack_pin_init!(let flow = Flow::<Token, Event, Context>::new());
-    stack_pin_init!(let component = ComponentB::new(flow.as_ref()));
+    stack_pin_init!(let flow = Flow::<ListToken, Event, Context>::new());
+    stack_pin_init!(let component = Component::new(flow.as_ref()));
 
     loop {
-        flow.emit(&mut token, &Event::Event, &mut context);
+        flow.emit(&mut list_token, &Event::Event, &mut context);
+        component
+            .handle
+            .handle1
+            .borrow_mut(&mut list_token)
+            .extra(&mut data_token);
+        component
+            .handle
+            .handle2
+            .borrow_mut(&mut list_token)
+            .extra(&mut data_token);
         defmt::info!("counter = {}", context.counter);
         Timer::after(Duration::from_millis(1000)).await;
-        component.comp1.handle1.borrow_mut(&mut token).extra();
-        component.comp1.handle2.borrow_mut(&mut token).extra();
         defmt::info!("counter = {}", context.counter);
         Timer::after(Duration::from_millis(1000)).await;
-        component.comp1.handle1.borrow_mut(&mut token).extra();
-        component.comp1.handle2.borrow_mut(&mut token).extra();
         defmt::info!("counter = {}", context.counter);
         Timer::after(Duration::from_millis(1000)).await;
     }
