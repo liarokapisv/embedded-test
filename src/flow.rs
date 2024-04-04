@@ -9,27 +9,27 @@ pub trait FlowCollector<K, V, Cxt> {
     fn emit(&mut self, token: &mut K, value: &V, context: &mut Cxt);
 }
 
-trait IsFlowNode<K, V, Cxt> {
-    fn node_ptrs(&self) -> &FlowNodePtrs<K, V, Cxt>;
+trait IsFlowNode<'h, K, V, Cxt> {
+    fn node_ptrs(&self) -> &FlowNodePtrs<'h, K, V, Cxt>;
     fn collector(&mut self) -> &mut dyn FlowCollector<K, V, Cxt>;
 }
 
-struct FlowNodePtrs<K, V, Cxt> {
-    prev: Cell<NonNull<dyn IsFlowNode<K, V, Cxt>>>,
-    next: Cell<NonNull<dyn IsFlowNode<K, V, Cxt>>>,
+struct FlowNodePtrs<'h, K, V, Cxt> {
+    prev: Cell<NonNull<dyn IsFlowNode<'h, K, V, Cxt> + 'h>>,
+    next: Cell<NonNull<dyn IsFlowNode<'h, K, V, Cxt> + 'h>>,
 }
 
 #[pin_data]
-pub struct Flow<K, V, Cxt> {
-    root: FlowNodePtrs<K, V, Cxt>,
+pub struct Flow<'h, K, V, Cxt> {
+    root: FlowNodePtrs<'h, K, V, Cxt>,
 }
 
-impl<K, V, Cxt> Flow<K, V, Cxt> {
+impl<'h, K, V, Cxt> Flow<'h, K, V, Cxt> {
     pub fn new() -> impl PinInit<Self>
     where
-        V: 'static,
-        K: 'static,
-        Cxt: 'static,
+        V: 'h,
+        K: 'h,
+        Cxt: 'h,
     {
         pin_init!(&this in Flow {
             root: FlowNodePtrs {
@@ -43,7 +43,7 @@ impl<K, V, Cxt> Flow<K, V, Cxt> {
     where
         K: Singleton,
     {
-        let root_ptr: NonNull<dyn IsFlowNode<K, V, Cxt>> = NonNull::from(self);
+        let root_ptr: NonNull<dyn IsFlowNode<K, V, Cxt> + '_> = NonNull::from(self);
         let mut prev_node_ptr = root_ptr;
         loop {
             let prev_node = unsafe {
@@ -83,14 +83,14 @@ impl<K, V, Cxt> Flow<K, V, Cxt> {
     }
 }
 
-impl<K: Singleton, V, Cxt> FlowCollector<K, V, Cxt> for Flow<K, V, Cxt> {
+impl<'h, K: Singleton, V, Cxt> FlowCollector<K, V, Cxt> for Flow<'h, K, V, Cxt> {
     fn emit(&mut self, token: &mut K, value: &V, context: &mut Cxt) {
         (self as &Self).emit(token, value, context);
     }
 }
 
-impl<K, V, Cxt> IsFlowNode<K, V, Cxt> for Flow<K, V, Cxt> {
-    fn node_ptrs(&self) -> &FlowNodePtrs<K, V, Cxt> {
+impl<'h, K, V, Cxt> IsFlowNode<'h, K, V, Cxt> for Flow<'h, K, V, Cxt> {
+    fn node_ptrs(&self) -> &FlowNodePtrs<'h, K, V, Cxt> {
         &self.root
     }
     fn collector(&mut self) -> &mut dyn FlowCollector<K, V, Cxt> {
@@ -99,29 +99,29 @@ impl<K, V, Cxt> IsFlowNode<K, V, Cxt> for Flow<K, V, Cxt> {
 }
 
 #[pin_data(PinnedDrop)]
-pub struct FlowHandle<K, V, Cxt, T> {
-    node_ptrs: FlowNodePtrs<K, V, Cxt>,
+pub struct FlowHandle<'h, K, V, Cxt, T> {
+    node_ptrs: FlowNodePtrs<'h, K, V, Cxt>,
     x: SCell<K, T>,
 }
 
-impl<K, V, Cxt, T> Deref for FlowHandle<K, V, Cxt, T> {
+impl<'h, K, V, Cxt, T> Deref for FlowHandle<'h, K, V, Cxt, T> {
     type Target = SCell<K, T>;
     fn deref(&self) -> &Self::Target {
         &self.x
     }
 }
 
-impl<K, V, Cxt, T> DerefMut for FlowHandle<K, V, Cxt, T> {
+impl<'h, K, V, Cxt, T> DerefMut for FlowHandle<'h, K, V, Cxt, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.x
     }
 }
 
-impl<K, V, Cxt, T> IsFlowNode<K, V, Cxt> for FlowHandle<K, V, Cxt, T>
+impl<'h, K, V, Cxt, T> IsFlowNode<'h, K, V, Cxt> for FlowHandle<'h, K, V, Cxt, T>
 where
     T: FlowCollector<K, V, Cxt>,
 {
-    fn node_ptrs(&self) -> &FlowNodePtrs<K, V, Cxt> {
+    fn node_ptrs(&self) -> &FlowNodePtrs<'h, K, V, Cxt> {
         &self.node_ptrs
     }
     fn collector(&mut self) -> &mut dyn FlowCollector<K, V, Cxt> {
@@ -129,12 +129,12 @@ where
     }
 }
 
-impl<K, V, Cxt, T> FlowHandle<K, V, Cxt, T> {
-    pub fn new(flow: Pin<&Flow<K, V, Cxt>>, x: T) -> impl PinInit<Self> + '_
+impl<'h, K, V, Cxt, T> FlowHandle<'h, K, V, Cxt, T> {
+    pub fn new<'f>(flow: Pin<&'f Flow<'h, K, V, Cxt>>, x: T) -> impl PinInit<Self> + 'f
     where
-        V: 'static,
-        K: 'static,
-        Cxt: 'static,
+        V: 'h,
+        K: 'h,
+        Cxt: 'h,
         T: FlowCollector<K, V, Cxt> + 'static + Unpin,
     {
         pin_init!(&this in Self{
@@ -164,7 +164,7 @@ impl<K, V, Cxt, T> FlowHandle<K, V, Cxt, T> {
 }
 
 #[pinned_drop]
-impl<K, V, Cxt, T> PinnedDrop for FlowHandle<K, V, Cxt, T> {
+impl<'h, K, V, Cxt, T> PinnedDrop for FlowHandle<'h, K, V, Cxt, T> {
     fn drop(self: Pin<&mut Self>) {
         let (prev_ptrs, next_ptrs) = {
             let (prev_ptrs, next_ptrs) = unsafe {
