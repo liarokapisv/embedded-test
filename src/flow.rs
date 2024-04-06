@@ -1,188 +1,379 @@
 use core::cell::Cell;
 use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
-use core::ptr::NonNull;
-use pinned_init::*;
-use singleton_cell::{SCell, Singleton};
+use core::ptr;
+use singleton_cell::SCell;
 
-pub trait FlowCollector<K, V, Cxt> {
-    fn emit(&mut self, token: &mut K, value: &V, context: &mut Cxt);
+/// Invariant: the `prev` and `next` pointers must form a fully consistent
+/// doubly-linked _cycle_ / ring.
+#[::pin_project::pin_project(PinnedDrop)]
+pub
+struct RingNodeLinks<'h, V, Cxt> {
+    prev: Cell<ptr::NonNull<dyn RingNode<'h, V, Cxt>>>,
+    next: Cell<ptr::NonNull<dyn RingNode<'h, V, Cxt>>>,
+    #[pin]
+    _pin_sensitive: ::core::marker::PhantomPinned,
 }
 
-trait IsFlowNode<'h, K, V, Cxt> {
-    fn node_ptrs(&self) -> &FlowNodePtrs<'h, K, V, Cxt>;
-    fn collector(&mut self) -> &mut dyn FlowCollector<K, V, Cxt>;
-}
-
-struct FlowNodePtrs<'h, K, V, Cxt> {
-    prev: Cell<NonNull<dyn IsFlowNode<'h, K, V, Cxt> + 'h>>,
-    next: Cell<NonNull<dyn IsFlowNode<'h, K, V, Cxt> + 'h>>,
-}
-
-#[pin_data]
-pub struct Flow<'h, K, V, Cxt> {
-    root: FlowNodePtrs<'h, K, V, Cxt>,
-}
-
-impl<'h, K, V, Cxt> Flow<'h, K, V, Cxt> {
-    pub fn new() -> impl PinInit<Self>
-    where
-        V: 'h,
-        K: 'h,
-        Cxt: 'h,
-    {
-        pin_init!(&this in Flow {
-            root: FlowNodePtrs {
-                prev: Cell::new(this),
-                next: Cell::new(this),
-            }
-        })
+impl<'h, V, Cxt> RingNodeLinks<'h, V, Cxt> {
+    fn is_uninit(&self) -> bool {
+        ::core::ptr::eq(
+            self.prev.get().as_ptr().cast(),
+            &DANGLING_NODE,
+        )
     }
 
-    pub fn emit(&self, token: &mut K, value: &V, context: &mut Cxt)
-    where
-        K: Singleton,
+    fn detach(self: Pin<&Self>) {
+        if self.is_uninit() {
+            return;
+        }
+        // if already "empty": self <-> self.
+        if self.prev.get().as_ptr().cast() as *const Self == &*self as _ {
+            return;
+        }
+        // otherwise, prev <-> self <-> next (where `prev` and `next` may be the same link).
+        let (prev_links, next_links) = unsafe {
+            // # SAFETY
+            //
+            // The invariant of our `Ring{,Node}`s stipulates that any `RingNode`
+            // in it, thanks to the `Pin`ning invariants, will, sequentially
+            // (no `Sync` thus no parallelism), remove themselves from the cycle
+            // on drop, before any of these other pointers get the chance to dangle.
+            //
+            // Thus, any pointer in a `RingNode` is guaranteed not to dangle.
+            (
+                self.prev().node_links(),
+                self.next().node_links(),
+            )
+        };
+
+        prev_links.next.set(self.next.get());
+        next_links.prev.set(self.prev.get());
+    }
+}
+
+#[::pin_project::pinned_drop]
+impl<'h, V, Cxt> PinnedDrop for RingNodeLinks<'h, V, Cxt> {
+    fn drop(self: Pin<&mut Self>) {
+        self.as_ref().detach()
+    }
+}
+
+impl<'h, V, Cxt> RingNode<'h, V, Cxt> for RingNodeLinks<'h, V, Cxt> {
+    fn node_links(self: Pin<&Self>) -> Pin<&Self> {
+        self
+    }
+}
+
+pub
+trait RingNode<'h, V, Cxt, __ = &'h (V, Cxt)> : RingNodeExt<'h, V, Cxt, __> {
+    fn node_links(self: Pin<&Self>) -> Pin<&RingNodeLinks<'h, V, Cxt>>;
+
+    fn collector_mut(self: Pin<&mut Self>)
+      -> Option<Pin<&mut dyn RingCollector<V, Cxt>>>
     {
-        let root_ptr: NonNull<dyn IsFlowNode<K, V, Cxt> + '_> = NonNull::from(self);
-        let mut prev_node_ptr = root_ptr;
+        // default impl
+        None
+    }
+}
+
+pub
+trait RingNodeExt<'h, V, Cxt, __ = &'h (V, Cxt)> : 'h {
+    unsafe
+    fn prev(self: Pin<&Self>)
+      -> Pin<&dyn RingNode<'h, V, Cxt>>
+    ;
+
+    unsafe
+    fn next(self: Pin<&Self>)
+      -> Pin<&dyn RingNode<'h, V, Cxt>>
+    ;
+
+    fn insert_before(
+        self: Pin<&Self>,
+        target_node: Pin<&RingNodeLinks<'h, V, Cxt>>,
+    )
+    ;
+}
+
+impl<'h, V, Cxt, T> RingNodeExt<'h, V, Cxt> for T
+where
+    Self : RingNode<'h, V, Cxt>,
+{
+    unsafe
+    fn prev(self: Pin<&Self>)
+      -> Pin<&dyn RingNode<'h, V, Cxt>>
+    {
+        // Safety: the pointer must be valid as guaranteed by the caller.
+        // Pin::new_unchecked() is fine since all nodes have been inserted
+        // once witnessed behind a `Pin`.
+        Pin::new_unchecked(self.node_links().prev.get().as_ref())
+    }
+
+    unsafe
+    fn next(self: Pin<&Self>)
+      -> Pin<&dyn RingNode<'h, V, Cxt>>
+    {
+        // Safety: the pointer must be valid as guaranteed by the caller.
+        // Pin::new_unchecked() is fine since all nodes have been inserted
+        // once witnessed behind a `Pin`.
+        Pin::new_unchecked(self.node_links().next.get().as_ref())
+    }
+
+    fn insert_before(
+        self: Pin<&Self>,
+        target_node: Pin<&RingNodeLinks<'h, V, Cxt>>,
+    )
+    {
+        let this_ptr = ptr::NonNull::from(&*self);
+        let this_node = self.node_links();
+
+        this_node.detach(); // in case of calling `insert_into()` multiple times.
+
+        let prev = unsafe {
+            // # SAFETY
+            //
+            // Since `Ring` is cyclic, the pointer is always valid.
+            // The resulting reference is only temporarily used and not store so we do
+            // not have any aliasing issues.
+            target_node.prev().node_links()
+        };
+
+        this_node.next.set(       prev.next.replace(this_ptr));
+        this_node.prev.set(target_node.prev.replace(this_ptr));
+    }
+}
+
+impl<V, Cxt> RingNodeLinks<'_, V, Cxt> {
+    fn dangling() -> Self {
+        Self {
+            prev: Cell::new(ptr::NonNull::from(&DANGLING_NODE)),
+            next: Cell::new(ptr::NonNull::from(&DANGLING_NODE)),
+            _pin_sensitive: <_>::default(),
+        }
+    }
+
+    pub
+    fn init(self: Pin<&Self>) {
+        let this = ptr::NonNull::<Self>::from(&*self);
+        self.prev.set(this);
+        self.next.set(this);
+    }
+}
+
+#[::pin_project::pin_project]
+/// A `RingNode` which has been given usufruct (full `&mut` powers) over
+/// all of its nodes.
+pub
+struct Ring<'h, V, Cxt> {
+    #[pin]
+    root: RingNodeLinks<'h, V, Cxt>,
+    sauron: Sauron,
+}
+
+impl<V, Cxt> Ring<'_, V, Cxt> {
+    pub fn new() -> Self {
+        Self {
+            root: RingNodeLinks::dangling(),
+            sauron: Sauron(()),
+        }
+    }
+
+    pub
+    fn init(self: Pin<&Self>) {
+        let this = self.project_ref();
+        this.root.init();
+    }
+}
+
+impl<'h, V, Cxt> RingNode<'h, V, Cxt> for Ring<'h, V, Cxt> {
+    fn node_links(self: Pin<&Self>) -> Pin<&RingNodeLinks<'h, V, Cxt>> {
+        self.project_ref().root
+    }
+}
+
+/// Token to help manipulate a `Ring`'s nodes in a more checked fashion.
+///
+/// The ideä is [`Sauron`] owns its [`Ring`], and through it, all of ring
+/// servants.
+///
+/// That is, _via_ <code>&'input mut [Sauron]</code> access, one will be able to
+/// have <code>&'input mut dyn [IsRingNode]<...></code> access, or shorter-lived
+/// reborrows thereof.
+///
+/// Mainly, consider the following mistake:
+/// While holding `&mut root`, let's get ahold of `&mut *root.next`.
+/// While doing that, let's get ahold of `&mut *next.prev = &mut root`.
+/// We now have two overlapping `&mut`s.
+///
+/// Now, using the Sauron token:
+/// While holding `&root`, we may temporarily `&mut`-upgrade it to `&mut root`
+/// via `&mut sauron`, but while this `&mut root` is held, we can no longer
+/// upgrade any other node.
+struct Sauron(());
+
+impl Sauron {
+    /// Safety: the `ptr` must be part of this Sauron's ring nodes
+    unsafe
+    fn to_ref<RingNode : ?Sized>(&self, ptr: ptr::NonNull<RingNode>)
+      -> Pin<&RingNode>
+    {
+        // Safety: ptrs in the ring have already been witnessed as `Pin`ned.
+        Pin::new_unchecked(ptr.as_ref())
+    }
+
+    /// Safety: the `ptr` must be part of this Sauron's ring nodes.
+    unsafe
+    fn to_mut<RingNode : ?Sized>(&mut self, ptr: ptr::NonNull<RingNode>)
+      -> Pin<&mut RingNode>
+    {
+        // Safety: ptrs in the ring have already been witnessed as `Pin`ned.
+        Pin::new_unchecked({ ptr }.as_mut())
+    }
+}
+
+pub trait RingCollector<V, Cxt> {
+    fn emit(self: Pin<&mut Self>, value: &V, context: &mut Cxt);
+}
+
+impl<'h, V, Cxt> RingCollector<V, Cxt> for Ring<'h, V, Cxt> {
+    fn emit(mut self: Pin<&mut Self>, value: &V, context: &mut Cxt) {
+        assert!(!self.root.is_uninit());
+
+        let root_ptr: ptr::NonNull<dyn RingNode<V, Cxt>> =
+            ptr::NonNull::from(unsafe { self.as_mut().get_unchecked_mut() })
+        ;
+        let sauron = self.as_mut().project().sauron;
+        let mut cursor: ptr::NonNull<dyn RingNode<V, Cxt>> = root_ptr;
         loop {
-            let prev_node = unsafe {
+            let cur_node: Pin<&dyn RingNode<V, Cxt>> = unsafe {
                 // # SAFETY
                 //
-                // At this point, the pointer points either to a valid `Handle` or to `Flow`'s root and as such is valid to dereference.
-                // We need to ensure that the reference to the trait object is unique which is the
-                // case since it is only acquired by this function and is otherwise private.
-
-                prev_node_ptr.as_ref()
+                // We've checked against `uninit`.
+                // Thus, the pointer cannot be dangling.
+                sauron.to_ref(cursor)
             };
 
-            let mut emit_node_ptr = prev_node.node_ptrs().next.get();
+            let next_node_ptr = cur_node.node_links().next.get();
 
-            if emit_node_ptr == root_ptr {
+            if ::core::ptr::addr_eq(next_node_ptr.as_ptr(), root_ptr.as_ptr()) {
                 return;
             }
 
-            let emit_node = unsafe {
+            let next_node_mut = unsafe {
                 // # SAFETY
                 //
-                // Since `Flow` is cyclic, the pointer is never undefined.
-                // It always points to a valid `Handle` and not to `Flow`'s root due to the previous check.
-                // All `Handle` pointers have been created through mutable references in contrast to the root Flow pointer,
+                // Since `Ring` is cyclic, the pointer is never undefined.
+                // It always points to a valid `Handle` and not to `Ring`'s root due to the previous check.
+                // All `Handle` pointers have been created through mutable references in contrast to the root Ring pointer,
                 // so we can safely cast to mut.
                 //
                 // We also need to ensure that not only the trait objects but also any references contained in their corresponding NodeHandles
                 // are not alive during this method call. This is ensured through the borrowed token.
 
-                emit_node_ptr.as_mut()
+                sauron.to_mut(next_node_ptr)
             };
 
-            emit_node.collector().emit(token, value, context);
+            if let Some(collector) = next_node_mut.collector_mut() {
+                collector.emit(value, context);
+            } else {
+                // should this be an error?
+            }
 
-            prev_node_ptr = emit_node_ptr;
+            cursor = next_node_ptr;
         }
     }
 }
 
-impl<'h, K: Singleton, V, Cxt> FlowCollector<K, V, Cxt> for Flow<'h, K, V, Cxt> {
-    fn emit(&mut self, token: &mut K, value: &V, context: &mut Cxt) {
-        (self as &Self).emit(token, value, context);
-    }
-}
-
-impl<'h, K, V, Cxt> IsFlowNode<'h, K, V, Cxt> for Flow<'h, K, V, Cxt> {
-    fn node_ptrs(&self) -> &FlowNodePtrs<'h, K, V, Cxt> {
-        &self.root
-    }
-    fn collector(&mut self) -> &mut dyn FlowCollector<K, V, Cxt> {
-        unreachable!("Collector should never be called through emit");
-    }
-}
-
-#[pin_data(PinnedDrop)]
-pub struct FlowHandle<'h, K, V, Cxt, T> {
-    node_ptrs: FlowNodePtrs<'h, K, V, Cxt>,
-    x: SCell<K, T>,
-}
-
-impl<'h, K, V, Cxt, T> Deref for FlowHandle<'h, K, V, Cxt, T> {
-    type Target = SCell<K, T>;
-    fn deref(&self) -> &Self::Target {
-        &self.x
-    }
-}
-
-impl<'h, K, V, Cxt, T> DerefMut for FlowHandle<'h, K, V, Cxt, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.x
-    }
-}
-
-impl<'h, K, V, Cxt, T> IsFlowNode<'h, K, V, Cxt> for FlowHandle<'h, K, V, Cxt, T>
+#[::pin_project::pin_project]
+pub struct RingNodeWithData<'h, V, Cxt, T>
 where
-    T: FlowCollector<K, V, Cxt>,
+    T: 'h + RingCollector<V, Cxt>,
 {
-    fn node_ptrs(&self) -> &FlowNodePtrs<'h, K, V, Cxt> {
-        &self.node_ptrs
-    }
-    fn collector(&mut self) -> &mut dyn FlowCollector<K, V, Cxt> {
-        self.x.get_mut()
+    #[pin]
+    node: RingNodeLinks<'h, V, Cxt>,
+
+    #[pin]
+    data: T,
+}
+
+impl<'h, V, Cxt, T> RingNodeWithData<'h, V, Cxt, T>
+where
+    T: 'h + RingCollector<V, Cxt>,
+{
+    pub
+    fn new(data: T) -> Self {
+        Self {
+            node: RingNodeLinks::dangling(),
+            data,
+        }
     }
 }
 
-impl<'h, K, V, Cxt, T> FlowHandle<'h, K, V, Cxt, T> {
-    pub fn new<'f>(flow: Pin<&'f Flow<'h, K, V, Cxt>>, x: T) -> impl PinInit<Self> + 'f
-    where
-        V: 'h,
-        K: 'h,
-        Cxt: 'h,
-        T: FlowCollector<K, V, Cxt> + 'static + Unpin,
+impl<'h, V, Cxt, T> RingNode<'h, V, Cxt>
+    for RingNodeWithData<'h, V, Cxt, T>
+where
+    T: 'h + RingCollector<V, Cxt>,
+{
+    fn node_links(self: Pin<&Self>) -> Pin<&RingNodeLinks<'h, V, Cxt>> {
+        self.project_ref().node
+    }
+
+    fn collector_mut(self: Pin<&mut Self>)
+      -> Option<Pin<&mut dyn RingCollector<V, Cxt>>>
     {
-        pin_init!(&this in Self{
-            node_ptrs: {
-                let prev = {
-                    let prev = unsafe {
-
-                        // # SAFETY
-                        //
-                        // Since `Flow` is cyclic, the pointer is always valid.
-                        // The resulting reference is only temporarily used and not store so we do
-                        // not have any aliasing issues.
-
-                        flow.root.prev.get().as_ref()
-                    };
-                    prev.node_ptrs()
-                };
-
-                FlowNodePtrs {
-                    prev: Cell::new(flow.root.prev.replace(this)),
-                    next: Cell::new(prev.next.replace(this))
-                }
-            },
-            x: SCell::new(x)
-        })
+        Some(self.project().data)
     }
 }
 
-#[pinned_drop]
-impl<'h, K, V, Cxt, T> PinnedDrop for FlowHandle<'h, K, V, Cxt, T> {
-    fn drop(self: Pin<&mut Self>) {
-        let (prev_ptrs, next_ptrs) = {
-            let (prev_ptrs, next_ptrs) = unsafe {
-                // # SAFETY
-                //
-                // `Flow` outlives all handles. Any non-alive handles will have unsubscribed by now.
-                // All remaining pointers point to valid handles due to the cyclic nature of `Flow`.
-                // We never store references to the next & prev 's pointees and since they are private, at no point are two references alive.
+impl<K, T: RingCollector<V, Cxt>, V, Cxt>
+    RingCollector<V, Cxt>
+for
+    SCell<K, T>
+where
+    // we need `Unpin` since the `SCell` type is missing a pin-projection
+    // getter, which forces us to go through `&mut`.
+    T : Unpin,
+{
+    fn emit(self: Pin<&mut Self>, value: &V, context: &mut Cxt) {
+        Pin::new(self.get_mut().get_mut()).emit(value, context)
+    }
+}
 
-                (
-                    self.node_ptrs.prev.get().as_ref(),
-                    self.node_ptrs.next.get().as_ref(),
-                )
-            };
-            (prev_ptrs.node_ptrs(), next_ptrs.node_ptrs())
-        };
+impl<'h, V, Cxt, T> Deref for RingNodeWithData<'h, V, Cxt, T>
+where
+    T: 'h + RingCollector<V, Cxt>,
+{
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.data
+    }
+}
 
-        prev_ptrs.next.set(self.node_ptrs.next.get());
-        next_ptrs.prev.set(self.node_ptrs.prev.get());
+impl<'h, V, Cxt, T> DerefMut for RingNodeWithData<'h, V, Cxt, T>
+where
+    T: 'h + Unpin + RingCollector<V, Cxt>,
+{
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.data
+    }
+}
+
+impl<'h, V, Cxt, T> RingNodeWithData<'h, V, Cxt, T>
+where
+    T: 'h + RingCollector<V, Cxt>,
+{
+    pub
+    fn data_mut(self: Pin<&mut Self>) -> Pin<&mut T> {
+        self.project().data
+    }
+}
+
+struct DanglingNode(());
+static DANGLING_NODE: DanglingNode = DanglingNode(());
+
+impl<'h, V, Cxt> RingNode<'h, V, Cxt> for DanglingNode {
+    fn node_links(self: Pin<&Self>) -> Pin<&RingNodeLinks<'h, V, Cxt>> {
+        unimplemented!("use of dangling node, i.e., uninit link!");
     }
 }
