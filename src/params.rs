@@ -1,0 +1,288 @@
+use core::marker::PhantomData;
+use crate::bounded::{Bounded, Norm, SNorm};
+
+pub enum Channel {
+    Omni,
+    Ch1,
+    Ch2,
+    Ch3,
+    Ch4,
+    Ch5,
+    Ch6,
+    Ch7,
+    Ch8,
+    Ch9,
+    Ch10,
+    Ch11,
+    Ch12,
+    Ch13,
+    Ch14,
+    Ch15,
+    Ch16,
+    Mpe,
+}
+
+pub enum ControlMode {
+    Jump,
+    Catch,
+    Scale,
+}
+
+pub enum DriveMode {
+    Low,
+    Mid,
+    High,
+}
+
+pub enum LfoSync {
+    Free,
+    Key,
+    Bpm,
+    BpmKey,
+}
+
+pub enum LfoWave {
+    Sine,
+    Triangle,
+    Saw,
+    Ramp,
+    Square,
+    Random,
+}
+
+pub enum PlayMode {
+    Poly,
+    Unison,
+    Solo,
+}
+
+pub enum TrackMode {
+    Off,
+    Mid,
+    High,
+}
+
+pub struct Coefficients {
+    vco_tune_1: SNorm,
+    vco_tune_2: SNorm,
+    vco_wave_1: SNorm,
+    vco_wave_2: SNorm,
+    vco_mix: SNorm,
+    vco_mod_1: SNorm,
+    vco_mod_2: SNorm,
+    vco_detune: SNorm,
+    vco_glide: SNorm,
+    filter_cutoff: SNorm,
+    filter_reson: SNorm,
+    filter_env: SNorm,
+    filter_lfo: SNorm,
+    filter_bass: SNorm,
+    filter_fm: SNorm,
+    master_spread: SNorm,
+    bbd_amount: SNorm,
+    bbd_morph: SNorm,
+    delay_mix: SNorm,
+    delay_time: SNorm,
+    delay_feed: SNorm,
+    poly_lfo_fade: SNorm,
+    poly_lfo_rate: SNorm,
+    poly_lfo_spread: SNorm,
+    eg_attack: SNorm,
+    eg_decay: SNorm,
+    eg_sustain: SNorm,
+    eg_release: SNorm,
+    vca_eg_attack: SNorm,
+    vca_eg_decay: SNorm,
+    vca_eg_sustain: SNorm,
+    vca_eg_release: SNorm,
+    lfo_b_rate: SNorm,
+    lfo_b_amount: SNorm,
+}
+
+pub enum CoefficientsChanged {
+    VcoTune1(SNorm),
+    VcoTune2(SNorm),
+    VcoWave1(SNorm),
+    VcoWave2(SNorm),
+    VcoMix(SNorm),
+    VcoMod1(SNorm),
+    VcoMod2(SNorm),
+    VcoDetune(SNorm),
+    VcoGlide(SNorm),
+    FilterCutoff(SNorm),
+    FilterReson(SNorm),
+    FilterEnv(SNorm),
+    FilterLfo(SNorm),
+    FilterBass(SNorm),
+    FilterFm(SNorm),
+    MasterSpread(SNorm),
+    BbdAmount(SNorm),
+    BbdMorph(SNorm),
+    DelayMix(SNorm),
+    DelayTime(SNorm),
+    DelayFeed(SNorm),
+    PolyLfoFade(SNorm),
+    PolyLfoRate(SNorm),
+    PolyLfoSpread(SNorm),
+    EgAttack(SNorm),
+    EgDecay(SNorm),
+    EgSustain(SNorm),
+    EgRelease(SNorm),
+    VcaEgAttack(SNorm),
+    VcaEgDecay(SNorm),
+    VcaEgSustain(SNorm),
+    VcaEgRelease(SNorm),
+    LfoBRate(SNorm),
+    LfoBAmount(SNorm),
+}
+
+pub struct BaseParameters {
+    vco_tune_1: Norm,
+    vco_tune_2: Norm,
+    vco_wave_1: Norm,
+    vco_wave_2: Norm,
+    vco_mix: Norm,
+    vco_mod_1: Norm,
+    vco_mod_2: Norm,
+    vco_detune: Norm,
+    vco_glide: Norm,
+    filter_cutoff: Norm,
+    filter_reson: Norm,
+    filter_env: Norm,
+    filter_lfo: Norm,
+    filter_bass: Norm,
+    filter_fm: Norm,
+    master_spread: Norm,
+    bbd_amount: Norm,
+    bbd_morph: Norm,
+    delay_mix: Norm,
+    delay_time: Norm,
+    delay_feed: Norm,
+    poly_lfo_fade: Norm,
+    poly_lfo_rate: Norm,
+    poly_lfo_spread: Norm,
+    eg_attack: Norm,
+    eg_decay: Norm,
+    eg_sustain: Norm,
+    eg_release: Norm,
+    vca_eg_attack: Norm,
+    vca_eg_decay: Norm,
+    vca_eg_sustain: Norm,
+    vca_eg_release: Norm,
+    lfo_b_rate: Norm,
+    lfo_b_amount: Norm,
+    lfo_b_wave: LfoWave,
+    poly_lfo_wave: LfoWave,
+    sync: bool,
+    track: TrackMode,
+}
+
+pub enum BaseParametersChanged {
+    VcoTune1(Norm),
+    VcoTune2(Norm),
+    VcoWave1(Norm),
+    VcoWave2(Norm),
+    VcoMix(Norm),
+    VcoMod1(Norm),
+    VcoMod2(Norm),
+    VcoDetune(Norm),
+    VcoGlide(Norm),
+    FilterCutoff(Norm),
+    FilterReson(Norm),
+    FilterEnv(Norm),
+    FilterLfo(Norm),
+    FilterBass(Norm),
+    FilterFm(Norm),
+    MasterSpread(Norm),
+    BbdAmount(Norm),
+    BbdMorph(Norm),
+    DelayMix(Norm),
+    DelayTime(Norm),
+    DelayFeed(Norm),
+    PolyLfoFade(Norm),
+    PolyLfoRate(Norm),
+    PolyLfoSpread(Norm),
+    EgAttack(Norm),
+    EgDecay(Norm),
+    EgSustain(Norm),
+    EgRelease(Norm),
+    VcaEgAttack(Norm),
+    VcaEgDecay(Norm),
+    VcaEgSustain(Norm),
+    VcaEgRelease(Norm),
+    LfoBRate(Norm),
+    LfoBAmount(Norm),
+    LfoBWave(LfoWave),
+    PolyLfoWave(LfoWave),
+    Sync(bool),
+    Track(TrackMode),
+}
+
+pub struct MenuParameters {
+    play_mode: PlayMode,
+    mod_wheel_coefficients: Coefficients,
+    velocity_coefficients: Coefficients,
+    aftertouch_coefficients: Coefficients,
+    drive_mode: DriveMode,
+    poly_lfo_sync: LfoSync,
+    global_lfo_sync: LfoSync,
+    amp_velocity: Norm,
+    legato: bool,
+    amp_level: Norm,
+}
+
+pub enum MenuParametersChanged {
+    PlayMode(PlayMode),
+    ModWheelCoefficients(CoefficientsChanged),
+    VelocityCoefficients(CoefficientsChanged),
+    AftertouchCoefficients(CoefficientsChanged),
+    DriveMode(DriveMode),
+    PolyLfoSync(LfoSync),
+    GlobalLfoSync(LfoSync),
+    AmpVelocity(Norm),
+    Legato(bool),
+    AmpLevel(Norm),
+}
+
+pub type PitchWheel = Bounded<i8, 0, 12>;
+pub type PitchWheelMpe = Bounded<i8, 0, 48>;
+    
+pub struct GlobalSettings {
+    channel: Channel,
+    cc_in: bool,
+    cc_out: bool,
+    pc_in: bool,
+    pc_out: bool,
+    fine_tune: SNorm,
+    control_mode: ControlMode,
+    load_preview: bool,
+    pitch_wheel: PitchWheel,
+    pitch_wheel_mpe: PitchWheelMpe,
+}
+
+pub enum GlobalSettingsChanged {
+    Channel(Channel),
+    CcIn(bool),
+    CcOut(bool),
+    PcIn(bool),
+    PcOut(bool),
+    FineTune(SNorm),
+    ControlMode(ControlMode),
+    LoadPreview(bool),
+    PitchWheel(PitchWheel),
+    PitchWheelMpe(PitchWheelMpe),
+}
+
+pub struct Parameters {
+    lfo_coefficients: Coefficients,
+    base_parameters: BaseParameters,
+    menu_parameters: MenuParameters,
+    global_settings: GlobalSettings,
+}
+
+pub enum ParametersChanged {
+    LfoCoefficients(CoefficientsChanged),
+    BaseParameters(BaseParametersChanged),
+    MenuParameters(MenuParametersChanged),
+    GlobalSettings(GlobalSettingsChanged),
+}
