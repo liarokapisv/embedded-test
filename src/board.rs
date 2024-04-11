@@ -1,7 +1,5 @@
-use core::future::Future;
-use core::pin::Pin;
-use core::ptr::DynMetadata;
-use core::ptr::Pointee;
+#![allow(dead_code)]
+
 use core::time::Duration;
 
 use crate::bounded::Bounded;
@@ -145,8 +143,8 @@ struct ButtonLike<T> {
     seq: T,
 }
 
-type Buttons<T: Button> = ButtonLike<T>;
-type Leds<T: Led> = ButtonLike<T>;
+type Buttons<T> = ButtonLike<T>;
+type Leds<T> = ButtonLike<T>;
 
 struct GlobalControls<O: OpaqueControl, G: Gpio> {
     vco_1_level: O,

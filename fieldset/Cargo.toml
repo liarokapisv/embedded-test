@@ -1,0 +1,8 @@
+[package]
+name = "fieldset"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fieldset_macro = { path = "fieldset-macro" }
+bitarray = "0.10.0"

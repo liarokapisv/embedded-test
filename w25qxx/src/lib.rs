@@ -1,5 +1,8 @@
+#![no_std]
+#![feature(effects)]
+
 use bitflags::bitflags;
-use core::{fmt, pin::pin};
+use core::fmt;
 use embedded_hal_async::spi;
 
 pub struct HexSlice<T>(pub T)
@@ -113,9 +116,9 @@ bitflags! {
     }
 }
 
-pub const PAGE_SIZE: u16 = 0x100;
-pub const SECTOR_SIZE: u32 = 0x1000;
-pub const BLOCK_SIZE: u32 = SECTOR_SIZE * 16;
+pub const PAGE_SIZE: usize = 0x100;
+pub const SECTOR_SIZE: usize = 0x1000;
+pub const BLOCK_SIZE: usize = SECTOR_SIZE * 16;
 
 pub struct FlashInfo {
     pub id: u32,
@@ -137,15 +140,15 @@ impl fmt::Debug for FlashInfo {
 
 impl FlashInfo {
     pub const fn page_to_sector(page_address: &u32) -> u32 {
-        return (page_address * (PAGE_SIZE) as u32) / SECTOR_SIZE;
+        return (page_address * PAGE_SIZE as u32) / SECTOR_SIZE as u32;
     }
 
     pub const fn page_to_block(page_address: &u32) -> u32 {
-        return (page_address * PAGE_SIZE as u32) / BLOCK_SIZE;
+        return (page_address * PAGE_SIZE as u32) / BLOCK_SIZE as u32;
     }
 
     pub const fn sector_to_block(sector_address: &u32) -> u32 {
-        return (sector_address * SECTOR_SIZE as u32) / BLOCK_SIZE;
+        return (sector_address * SECTOR_SIZE as u32) / BLOCK_SIZE as u32;
     }
 
     pub const fn sector_to_page(sector_address: &u32) -> u32 {
@@ -161,6 +164,7 @@ pub struct W25Q80<T> {
     spi: T,
 }
 
+#[derive(Debug)]
 pub enum Error<E> {
     Spi(E),
     UnexpectedStatus,
@@ -240,13 +244,10 @@ impl<T: spi::SpiDevice> W25Q80<T> {
 
         let device_info = FlashInfo {
             id: 0,
-            page_size: 256,
-            sector_size: 0x1000,
             sector_count: block_count * 16,
-            page_count: (block_count * 16 * 0x1000) / 256,
-            block_size: 0x1000 * 16,
+            page_count: (block_count * BLOCK_SIZE as u32) / PAGE_SIZE as u32,
             block_count,
-            capacity_kb: (0x1000 * 16 * block_count) / 1024,
+            capacity_kb: (BLOCK_SIZE as u32 * block_count) / 1024,
         };
         return Ok(device_info);
     }
@@ -292,25 +293,40 @@ impl<T: spi::SpiDevice> W25Q80<T> {
         Ok(())
     }
 
-    pub async fn erase_sectors(
-        &mut self,
-        addr: u32,
-        amount: usize,
-        delay_ns: u32,
-    ) -> Result<(), T::Error> {
-        for c in 0..amount {
+    pub async fn write(&mut self, addr: u32, data: &[u8], delay_ns: u32) -> Result<(), T::Error> {
+        for (c, chunk) in data.chunks(256).enumerate() {
             self.write_enable().await?;
 
             let current_addr: u32 = (addr as usize + c * 256).try_into().unwrap();
-            let mut cmd_buf = [
-                Opcode::SectorErase as u8,
+            let cmd_buf = [
+                Opcode::PageProg as u8,
                 (current_addr >> 16) as u8,
                 (current_addr >> 8) as u8,
                 current_addr as u8,
             ];
-            self.transfer(&mut cmd_buf).await?;
+
+            let mut ops = [
+                spi::Operation::Write(&cmd_buf),
+                spi::Operation::Write(&chunk),
+            ];
+
+            self.spi.transaction(&mut ops).await?;
             self.wait_done(delay_ns).await?;
         }
+        Ok(())
+    }
+
+    pub async fn erase_sector(&mut self, addr: u32, delay_ns: u32) -> Result<(), T::Error> {
+        self.write_enable().await?;
+
+        let cmd_buf = [
+            Opcode::SectorErase as u8,
+            (addr >> 16) as u8,
+            (addr >> 8) as u8,
+            addr as u8,
+        ];
+        self.transfer(&cmd_buf).await?;
+        self.wait_done(delay_ns).await?;
 
         Ok(())
     }

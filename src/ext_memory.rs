@@ -1,12 +1,12 @@
 use crate::board::ExtMemory;
 use crate::w25qxx::{PAGE_SIZE, SECTOR_SIZE, W25Q80};
-use embedded_hal_async::spi::SpiDevice;
+use embedded_hal_async::spi::{ErrorType, SpiDevice};
 
 pub struct Driver<T> {
     device: W25Q80<T>,
 }
 
-type NewError<T: SpiDevice> = crate::w25qxx::Error<T::Error>;
+type NewError<T> = crate::w25qxx::Error<<T as ErrorType>::Error>;
 
 impl<T: SpiDevice> Driver<T> {
     pub async fn new(device: T) -> Result<Self, NewError<T>> {

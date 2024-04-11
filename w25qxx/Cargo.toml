@@ -1,0 +1,9 @@
+[package]
+name = "w25qxx"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitflags = "2.5.0"
+embedded-hal-async = "1.0.0"
+embassy-time = "0.3.0"

@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+
 use crate::bounded::Bounded;
 
 struct PrevInput<T>(Option<T>);

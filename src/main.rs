@@ -5,24 +5,22 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(const_trait_impl)]
 #![feature(effects)]
+#![allow(dead_code)]
 
 mod adc;
 mod board;
 mod bounded;
 mod ext_memory;
-mod flow;
 mod parameter_controllers;
 mod params;
 mod user_inputs;
-mod w25qxx;
-
-use core::cell::RefCell;
 
 use embassy_stm32::init;
 use embassy_stm32::spi;
 use embassy_time::Delay;
 use embassy_time::Duration;
 use embassy_time::Timer;
+use w25qxx;
 
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Speed};
