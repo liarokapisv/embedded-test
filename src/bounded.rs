@@ -1,6 +1,6 @@
 use num::cast::AsPrimitive;
 
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Bounded<T, const MIN: i32, const MAX: i32>(T);
 
 impl<T, const MIN: i32, const MAX: i32> Bounded<T, MIN, MAX> {

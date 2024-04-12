@@ -4,6 +4,7 @@ use fieldset::*;
 
 use crate::bounded::{Bounded, Norm, SNorm};
 
+#[derive(Debug, Clone, Copy)]
 pub enum Channel {
     Omni,
     Ch1,
@@ -25,18 +26,21 @@ pub enum Channel {
     Mpe,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum ControlMode {
     Jump,
     Catch,
     Scale,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum DriveMode {
     Low,
     Mid,
     High,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum LfoSync {
     Free,
     Key,
@@ -44,6 +48,7 @@ pub enum LfoSync {
     BpmKey,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum LfoWave {
     Sine,
     Triangle,
@@ -53,19 +58,21 @@ pub enum LfoWave {
     Random,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum PlayMode {
     Poly,
     Unison,
     Solo,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum TrackMode {
     Off,
     Mid,
     High,
 }
 
-#[derive(FieldSet)]
+#[derive(Debug, Clone, Copy, FieldSet)]
 pub struct Coefficients {
     pub vco_tune_1: SNorm,
     pub vco_tune_2: SNorm,
@@ -103,7 +110,7 @@ pub struct Coefficients {
     pub lfo_b_amount: SNorm,
 }
 
-#[derive(FieldSet)]
+#[derive(Debug, Clone, Copy, FieldSet)]
 pub struct BaseParameters {
     pub vco_tune_1: Norm,
     pub vco_tune_2: Norm,
@@ -145,7 +152,7 @@ pub struct BaseParameters {
     pub track: TrackMode,
 }
 
-#[derive(FieldSet)]
+#[derive(Debug, Clone, Copy, FieldSet)]
 pub struct MenuParameters {
     pub play_mode: PlayMode,
     #[fieldset]
@@ -165,7 +172,7 @@ pub struct MenuParameters {
 pub type PitchWheel = Bounded<i8, 0, 12>;
 pub type PitchWheelMpe = Bounded<i8, 0, 48>;
 
-#[derive(FieldSet)]
+#[derive(Debug, Clone, Copy, FieldSet)]
 pub struct GlobalSettings {
     pub channel: Channel,
     pub cc_in: bool,
@@ -179,7 +186,7 @@ pub struct GlobalSettings {
     pub pitch_wheel_mpe: PitchWheelMpe,
 }
 
-#[derive(FieldSet)]
+#[derive(Debug, Clone, Copy, FieldSet)]
 pub struct Parameters {
     #[fieldset]
     pub lfo_coefficients: Coefficients,
