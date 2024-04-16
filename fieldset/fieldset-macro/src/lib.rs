@@ -207,6 +207,10 @@ fn derive_opt_fieldset_setter_trait_impl(name: String, fields: FieldsNamed) -> T
         impl #setter_trait_identifier for &mut #fieldset_identifier {
             #( #methods )*
         }
+
+        impl #setter_trait_identifier for #fieldset_identifier {
+            #( #methods )*
+        }
     )
     .into()
 }
@@ -404,6 +408,10 @@ fn derive_common_fieldset_trait_impl(
         fields,
     );
     quote!(
+        impl #trait_identifier for #fieldset_identifier {
+            #methods
+        }
+
         impl #trait_identifier for &mut #fieldset_identifier {
             #methods
         }
@@ -457,6 +465,13 @@ fn derive_bitset_fieldset(name: String, _fields: FieldsNamed) -> TokenStream {
                 }
             }
         }
+
+        impl Default for #fieldset_identifier {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
     )
     .into()
 }

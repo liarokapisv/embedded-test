@@ -29,6 +29,16 @@ impl<T, const MIN: i32, const MAX: i32> Bounded<T, MIN, MAX> {
     }
 }
 
+//impl<T, const MIN: i32, const MAX: i32> Default for Bounded<T, MIN, MAX>
+//where
+//    T: Default,
+//    [(); (MIN <= 0) as usize * (MAX >= 0) as usize]: Sized,
+//{
+//    fn default() -> Self {
+//        unsafe { Self::new_unchecked(Default::default()) }
+//    }
+//}
+
 pub type BoundedFloat<const MIN: i32, const MAX: i32> = Bounded<f32, MIN, MAX>;
 
 pub type Norm = BoundedFloat<0, 1>;

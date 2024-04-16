@@ -23,3 +23,9 @@ embedded-hal-bus = { version = "0.1.0", features = ["async"] }
 num = { version = "0.4.1", default-features = false }
 fieldset = { path = "fieldset" }
 w25qxx = { path = "w25qxx" }
+static_assertions = "1.1.0"
+pin-project = "1.1.5"
+futures = { version = "0.3.30", default-features = false }
+atomic_enum = "0.3.0"
+elain = "0.3.0"
+delegate = "0.12.0"

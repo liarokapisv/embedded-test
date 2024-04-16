@@ -2,14 +2,16 @@
 #![no_main]
 #![feature(const_fn_floating_point_arithmetic)]
 #![feature(ptr_metadata)]
-#![feature(impl_trait_in_assoc_type)]
-#![feature(const_trait_impl)]
+#![feature(type_alias_impl_trait)]
 #![feature(effects)]
+#![feature(never_type)]
+#![feature(future_join)]
 #![allow(dead_code)]
 
 mod adc;
 mod board;
 mod bounded;
+mod display;
 mod ext_memory;
 mod parameter_controllers;
 mod params;
